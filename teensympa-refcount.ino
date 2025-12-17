@@ -69,6 +69,14 @@ bool kitDirty;
   //#define DPAD_GPIO_MODE
   #define DPAD_I2C_PIMORONI
   
+  // Compile-time check for mode configuration
+  #if defined(DPAD_GPIO_MODE) && defined(DPAD_I2C_PIMORONI)
+    #error "Cannot define both DPAD_GPIO_MODE and DPAD_I2C_PIMORONI. Choose only one."
+  #endif
+  #if !defined(DPAD_GPIO_MODE) && !defined(DPAD_I2C_PIMORONI)
+    #error "Must define either DPAD_GPIO_MODE or DPAD_I2C_PIMORONI when DPAD_ENABLED is set."
+  #endif
+  
   #ifdef DPAD_GPIO_MODE
     // GPIO mode: pins connected to switches that short to ground when pressed
     #define DPAD_UP_PIN 14
@@ -175,11 +183,11 @@ uint8_t readPimoroniPad() {
     return 0; // I2C error, return no buttons pressed
   }
   
-  Wire.requestFrom(PIMORONI_PAD_I2C_ADDR, (uint8_t)1);
-  if (Wire.available()) {
+  // Request 1 byte and verify we received it
+  if (Wire.requestFrom(PIMORONI_PAD_I2C_ADDR, 1) == 1) {
     return Wire.read();
   }
-  return 0;
+  return 0; // Failed to receive expected byte
 }
 #endif
 

@@ -1,4 +1,16 @@
 #include <USBHost_t36.h>
+#include <Wire.h>
+
+// Board detection - this firmware supports both Teensy 3.6 and Teensy 4.1
+#if defined(__IMXRT1062__)
+  #define TEENSY_41
+  #pragma message "Compiling for Teensy 4.1"
+#elif defined(__MK66FX1M0__)
+  #define TEENSY_36
+  #pragma message "Compiling for Teensy 3.6"
+#else
+  #warning "This firmware is designed for Teensy 3.6 or Teensy 4.1"
+#endif
 
 USBHost usbHost;
 USBHub hubOne( usbHost );
@@ -18,6 +30,14 @@ struct kitstate {
   int gHat; 
 };
 
+// D-pad state structure for Rock Band navigation
+struct dpadstate {
+  bool up;
+  bool down;
+  bool left;
+  bool right;
+};
+
 // boolean flag indicating whether we need to send the kit state
 // out to our connected device - set by noteon events, or an imminent
 // timing out of a pad
@@ -25,18 +45,58 @@ struct kitstate {
 bool kitDirty;
 
 // some configuration 
-//  - the LEDPIN is the default for the T3.6
+//  - the LEDPIN is the default for the T3.6 and T4.1 (both use pin 13)
 //  - if INPUTPIN is defined, you can trigger a 'start/select' by shorting it to ground
-//  - if CC_MAX is defined, 'start/select' will be triggered by any continous controller (usually a hat pedal) exceeding that value
+//  - if CC_MAX is defined, 'start/select' will be triggered by any continuous controller (usually a hat pedal) exceeding that value
 //  - NOTE_ON_TIME indicates the minimum duration, in milliseconds, notes will be left on: we don't wait for noteoff here
 //    this uses elapsed time based on millis() instead of an interrupt - make sure you reboot your adapter at least once every 50 days
 //  - BLINKY, if defined, will flash the LEDPIN when any pad is "on"
+//  - D-pad pins for Rock Band navigation (comment out to disable D-pad support)
 
 #define LEDPIN 13
 //#define INPUTPIN 0
 #define CC_MAX 0x5A
 #define NOTE_ON_TIME 25
 #define BLINKY 1
+
+// D-pad configuration for Rock Band navigation
+// Two modes supported:
+// 1. GPIO mode: Direct pin connections (switches to ground)
+// 2. I2C mode: Pimoroni Qw/ST Pad
+#define DPAD_ENABLED 1
+#ifdef DPAD_ENABLED
+  // Choose D-pad mode: comment/uncomment one of these
+  //#define DPAD_GPIO_MODE
+  #define DPAD_I2C_PIMORONI
+  
+  // Compile-time check for mode configuration
+  #if defined(DPAD_GPIO_MODE) && defined(DPAD_I2C_PIMORONI)
+    #error "Cannot define both DPAD_GPIO_MODE and DPAD_I2C_PIMORONI. Choose only one."
+  #endif
+  #if !defined(DPAD_GPIO_MODE) && !defined(DPAD_I2C_PIMORONI)
+    #error "Must define either DPAD_GPIO_MODE or DPAD_I2C_PIMORONI when DPAD_ENABLED is set."
+  #endif
+  
+  #ifdef DPAD_GPIO_MODE
+    // GPIO mode: pins connected to switches that short to ground when pressed
+    #define DPAD_UP_PIN 14
+    #define DPAD_DOWN_PIN 15
+    #define DPAD_LEFT_PIN 16
+    #define DPAD_RIGHT_PIN 17
+  #endif
+  
+  #ifdef DPAD_I2C_PIMORONI
+    // Pimoroni Qw/ST Pad I2C configuration
+    #define PIMORONI_PAD_I2C_ADDR 0x50
+    // Register addresses for Pimoroni Qw/ST Pad
+    #define PIMORONI_REG_BUTTON 0x00
+    // Button bit masks
+    #define PIMORONI_BTN_UP    0x01
+    #define PIMORONI_BTN_DOWN  0x02
+    #define PIMORONI_BTN_LEFT  0x04
+    #define PIMORONI_BTN_RIGHT 0x08
+  #endif
+#endif
 
 // the Yamaha DTX 502 seems to assign MIDI numbers to the crash and ride hats that
 // are reversed compared with my TD-1 and the original MPA settings - uncomment the below to use them
@@ -50,6 +110,10 @@ unsigned long lastLoopTime;
 #ifdef CC_MAX
 bool continuousControllerPressed = false;
 #endif
+#ifdef DPAD_ENABLED
+struct dpadstate currentDpadState;
+struct dpadstate previousDpadState;
+#endif
 
 
 void setup() {
@@ -57,6 +121,32 @@ void setup() {
   pinMode( INPUTPIN, INPUT_PULLUP );
 #endif
   pinMode( LEDPIN, OUTPUT );
+
+#ifdef DPAD_ENABLED
+  #ifdef DPAD_GPIO_MODE
+    // Configure D-pad GPIO pins with internal pullups
+    pinMode( DPAD_UP_PIN, INPUT_PULLUP );
+    pinMode( DPAD_DOWN_PIN, INPUT_PULLUP );
+    pinMode( DPAD_LEFT_PIN, INPUT_PULLUP );
+    pinMode( DPAD_RIGHT_PIN, INPUT_PULLUP );
+  #endif
+  
+  #ifdef DPAD_I2C_PIMORONI
+    // Initialize I2C for Pimoroni Qw/ST Pad
+    Wire.begin();
+    Wire.setClock(100000); // 100kHz I2C
+  #endif
+  
+  // Initialize D-pad state
+  currentDpadState.up = false;
+  currentDpadState.down = false;
+  currentDpadState.left = false;
+  currentDpadState.right = false;
+  previousDpadState.up = false;
+  previousDpadState.down = false;
+  previousDpadState.left = false;
+  previousDpadState.right = false;
+#endif
 
   currentKitState.rPad = 0;
   currentKitState.kick = 0;
@@ -83,6 +173,23 @@ void setup() {
   midiInput.setHandleControlChange( controlChange );
 #endif
 };
+
+#ifdef DPAD_I2C_PIMORONI
+// Read button state from Pimoroni Qw/ST Pad via I2C
+uint8_t readPimoroniPad() {
+  Wire.beginTransmission(PIMORONI_PAD_I2C_ADDR);
+  Wire.write(PIMORONI_REG_BUTTON);
+  if (Wire.endTransmission() != 0) {
+    return 0; // I2C error, return no buttons pressed
+  }
+  
+  // Request 1 byte and verify we received it
+  if (Wire.requestFrom(PIMORONI_PAD_I2C_ADDR, 1) == 1) {
+    return Wire.read();
+  }
+  return 0; // Failed to receive expected byte
+}
+#endif
 
 // if a kit has a positive time on remaining, reduce it by 'elapsed' milliseconds,
 // but clamp the value at zero. set the kit dirty flag if any kit would hit zero.
@@ -133,6 +240,35 @@ void loop() {
     previousInputPinState = inputPinState;
   }
 
+#ifdef DPAD_ENABLED
+  // Read D-pad state based on configured mode
+  #ifdef DPAD_GPIO_MODE
+    // GPIO mode: Read pins (active LOW - pressed when pin is LOW)
+    currentDpadState.up = ( digitalRead( DPAD_UP_PIN ) == LOW );
+    currentDpadState.down = ( digitalRead( DPAD_DOWN_PIN ) == LOW );
+    currentDpadState.left = ( digitalRead( DPAD_LEFT_PIN ) == LOW );
+    currentDpadState.right = ( digitalRead( DPAD_RIGHT_PIN ) == LOW );
+  #endif
+  
+  #ifdef DPAD_I2C_PIMORONI
+    // I2C mode: Read from Pimoroni Qw/ST Pad
+    uint8_t buttons = readPimoroniPad();
+    currentDpadState.up = (buttons & PIMORONI_BTN_UP) != 0;
+    currentDpadState.down = (buttons & PIMORONI_BTN_DOWN) != 0;
+    currentDpadState.left = (buttons & PIMORONI_BTN_LEFT) != 0;
+    currentDpadState.right = (buttons & PIMORONI_BTN_RIGHT) != 0;
+  #endif
+  
+  // Check if D-pad state changed
+  if( currentDpadState.up != previousDpadState.up ||
+      currentDpadState.down != previousDpadState.down ||
+      currentDpadState.left != previousDpadState.left ||
+      currentDpadState.right != previousDpadState.right ) {
+    kitDirty = true;
+    previousDpadState = currentDpadState;
+  }
+#endif
+
   // if the kit is dirty, send the necessary reports
   if( kitDirty ) {
     usb_mpa_reset_packet();
@@ -147,6 +283,30 @@ void loop() {
     if( currentKitState.yHat ) usb_mpa_set_hat( MPA_HAT_UP );
     if( currentKitState.bHat ) usb_mpa_set_hat( MPA_HAT_DOWN );
     if( currentKitState.yHat || currentKitState.bHat || currentKitState.gHat ) usb_mpa_set_button( 11 );
+    
+#ifdef DPAD_ENABLED
+    // Map D-pad to HAT control for Rock Band navigation
+    // D-pad takes priority over drum cymbals only when actually pressed
+    if( currentDpadState.up || currentDpadState.down || currentDpadState.left || currentDpadState.right ) {
+      if( currentDpadState.up && currentDpadState.right ) {
+        usb_mpa_set_hat( MPA_HAT_UP_RIGHT );
+      } else if( currentDpadState.up && currentDpadState.left ) {
+        usb_mpa_set_hat( MPA_HAT_UP_LEFT );
+      } else if( currentDpadState.down && currentDpadState.right ) {
+        usb_mpa_set_hat( MPA_HAT_DOWN_RIGHT );
+      } else if( currentDpadState.down && currentDpadState.left ) {
+        usb_mpa_set_hat( MPA_HAT_DOWN_LEFT );
+      } else if( currentDpadState.up ) {
+        usb_mpa_set_hat( MPA_HAT_UP );
+      } else if( currentDpadState.down ) {
+        usb_mpa_set_hat( MPA_HAT_DOWN );
+      } else if( currentDpadState.left ) {
+        usb_mpa_set_hat( MPA_HAT_LEFT );
+      } else if( currentDpadState.right ) {
+        usb_mpa_set_hat( MPA_HAT_RIGHT );
+      }
+    }
+#endif
     
     usb_mpa_send();
     kitDirty = false;
@@ -219,7 +379,7 @@ void onNoteOn( byte channel, byte note, byte velocity ) {
 }
 
 #ifdef CC_MAX
-// this function reads all continous controllers at once - not ideal, but
+// this function reads all continuous controllers at once - not ideal, but
 // I didn't want to have to deal with different kits defining them differently
 void controlChange(byte channel, byte control, byte value) {
   if( value >= CC_MAX ) continuousControllerPressed = true;

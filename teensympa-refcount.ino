@@ -46,7 +46,7 @@ bool kitDirty;
 // some configuration 
 //  - the LEDPIN is the default for the T3.6 and T4.1 (both use pin 13)
 //  - if INPUTPIN is defined, you can trigger a 'start/select' by shorting it to ground
-//  - if CC_MAX is defined, 'start/select' will be triggered by any continous controller (usually a hat pedal) exceeding that value
+//  - if CC_MAX is defined, 'start/select' will be triggered by any continuous controller (usually a hat pedal) exceeding that value
 //  - NOTE_ON_TIME indicates the minimum duration, in milliseconds, notes will be left on: we don't wait for noteoff here
 //    this uses elapsed time based on millis() instead of an interrupt - make sure you reboot your adapter at least once every 50 days
 //  - BLINKY, if defined, will flash the LEDPIN when any pad is "on"
@@ -219,23 +219,25 @@ void loop() {
     
 #ifdef DPAD_ENABLED
     // Map D-pad to HAT control for Rock Band navigation
-    // D-pad Up/Down take priority over drum cymbals for HAT control
-    if( currentDpadState.up && currentDpadState.right ) {
-      usb_mpa_set_hat( MPA_HAT_UP_RIGHT );
-    } else if( currentDpadState.up && currentDpadState.left ) {
-      usb_mpa_set_hat( MPA_HAT_UP_LEFT );
-    } else if( currentDpadState.down && currentDpadState.right ) {
-      usb_mpa_set_hat( MPA_HAT_DOWN_RIGHT );
-    } else if( currentDpadState.down && currentDpadState.left ) {
-      usb_mpa_set_hat( MPA_HAT_DOWN_LEFT );
-    } else if( currentDpadState.up ) {
-      usb_mpa_set_hat( MPA_HAT_UP );
-    } else if( currentDpadState.down ) {
-      usb_mpa_set_hat( MPA_HAT_DOWN );
-    } else if( currentDpadState.left ) {
-      usb_mpa_set_hat( MPA_HAT_LEFT );
-    } else if( currentDpadState.right ) {
-      usb_mpa_set_hat( MPA_HAT_RIGHT );
+    // D-pad takes priority over drum cymbals only when actually pressed
+    if( currentDpadState.up || currentDpadState.down || currentDpadState.left || currentDpadState.right ) {
+      if( currentDpadState.up && currentDpadState.right ) {
+        usb_mpa_set_hat( MPA_HAT_UP_RIGHT );
+      } else if( currentDpadState.up && currentDpadState.left ) {
+        usb_mpa_set_hat( MPA_HAT_UP_LEFT );
+      } else if( currentDpadState.down && currentDpadState.right ) {
+        usb_mpa_set_hat( MPA_HAT_DOWN_RIGHT );
+      } else if( currentDpadState.down && currentDpadState.left ) {
+        usb_mpa_set_hat( MPA_HAT_DOWN_LEFT );
+      } else if( currentDpadState.up ) {
+        usb_mpa_set_hat( MPA_HAT_UP );
+      } else if( currentDpadState.down ) {
+        usb_mpa_set_hat( MPA_HAT_DOWN );
+      } else if( currentDpadState.left ) {
+        usb_mpa_set_hat( MPA_HAT_LEFT );
+      } else if( currentDpadState.right ) {
+        usb_mpa_set_hat( MPA_HAT_RIGHT );
+      }
     }
 #endif
     
@@ -310,7 +312,7 @@ void onNoteOn( byte channel, byte note, byte velocity ) {
 }
 
 #ifdef CC_MAX
-// this function reads all continous controllers at once - not ideal, but
+// this function reads all continuous controllers at once - not ideal, but
 // I didn't want to have to deal with different kits defining them differently
 void controlChange(byte channel, byte control, byte value) {
   if( value >= CC_MAX ) continuousControllerPressed = true;

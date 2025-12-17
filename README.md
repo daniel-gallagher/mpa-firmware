@@ -7,6 +7,8 @@ This Arduino sketch is firmware for a **Teensy 3.6** or **Teensy 4.1** using the
 - **Dual Board Support**: Works on both Teensy 3.6 and Teensy 4.1 with automatic board detection
 - **MIDI Drum Kit Translation**: Listens for MIDI input from drum kits and translates to MPA button presses
 - **D-pad Support**: Added support for a 4-direction D-pad for Rock Band menu navigation
+  - **GPIO Mode**: Direct connection of switches to Teensy pins
+  - **I2C Mode**: Pimoroni Qw/ST Pad via I2C (default)
 - **Flexible Input**: Start/Select can be triggered via digital pin or continuous controller (hat pedal)
 - **Drum Kit Compatibility**: Includes note mappings for Roland V-Drums and Yamaha DTX series
 
@@ -22,6 +24,7 @@ Start/Select can be pressed either by:
 
 ✨ **Teensy 4.1 Support**: Full compatibility with Teensy 4.1 hardware  
 ✨ **D-pad Navigation**: Added 4-direction D-pad support for Rock Band menus  
+✨ **I2C D-pad Support**: Now supports Pimoroni Qw/ST Pad via I2C (as well as GPIO mode)  
 ✨ **Improved Documentation**: Comprehensive migration guide and pinout information
 
 ## Documentation

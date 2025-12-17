@@ -64,15 +64,29 @@ The following pins are used by the firmware:
 
 ### Overview
 
-D-pad support has been added for Rock Band navigation and menu control. The D-pad uses 4 digital input pins configured with internal pull-up resistors.
+D-pad support has been added for Rock Band navigation and menu control. Two modes are supported:
+1. **GPIO Mode**: Direct connection of switches to Teensy pins
+2. **I2C Mode**: Pimoroni Qw/ST Pad connected via I2C
 
-### Hardware Connection
+### Mode Selection
 
-Each D-pad direction requires:
+Choose your D-pad mode by uncommenting the appropriate define in the firmware:
+
+```cpp
+#ifdef DPAD_ENABLED
+  // Choose D-pad mode: comment/uncomment one of these
+  //#define DPAD_GPIO_MODE       // Direct pin connections
+  #define DPAD_I2C_PIMORONI     // Pimoroni Qw/ST Pad (default)
+#endif
+```
+
+### GPIO Mode Hardware Connection
+
+When using `DPAD_GPIO_MODE`, each D-pad direction requires:
 1. A momentary switch (pushbutton or arcade button)
 2. Connection between the assigned pin and ground when pressed
 
-**Wiring Diagram:**
+**GPIO Mode Wiring Diagram:**
 
 ```
 Teensy 4.1          Switch          Ground
@@ -82,22 +96,41 @@ Pin 16 (Left)  ----[SWITCH]----    GND
 Pin 17 (Right) ----[SWITCH]----    GND
 ```
 
-### Pin Configuration
-
 The D-pad pins are configured with internal pull-ups, so they read HIGH when not pressed and LOW when the button is pressed (shorting to ground).
 
-Default pin assignments:
+Default GPIO pin assignments:
 - **Up**: Pin 14
 - **Down**: Pin 15
 - **Left**: Pin 16
 - **Right**: Pin 17
 
-### Customizing D-pad Pins
+### I2C Mode (Pimoroni Qw/ST Pad)
 
-To change D-pad pin assignments, edit these defines in the firmware:
+When using `DPAD_I2C_PIMORONI` (default), connect the Pimoroni Qw/ST Pad via I2C:
+
+**I2C Wiring:**
+
+```
+Teensy 4.1          Pimoroni Qw/ST Pad
+SDA (Pin 18)   ---- SDA
+SCL (Pin 19)   ---- SCL
+3.3V           ---- 3.3V
+GND            ---- GND
+```
+
+**I2C Configuration:**
+- **I2C Address**: 0x50 (default for Pimoroni Qw/ST Pad)
+- **I2C Speed**: 100 kHz
+- **Interface**: Uses standard Wire library
+
+The Pimoroni Qw/ST Pad is automatically detected and read via I2C. No pin configuration is needed.
+
+### Customizing D-pad Configuration
+
+**To change GPIO pin assignments** (when using `DPAD_GPIO_MODE`):
 
 ```cpp
-#ifdef DPAD_ENABLED
+#ifdef DPAD_GPIO_MODE
   #define DPAD_UP_PIN 14
   #define DPAD_DOWN_PIN 15
   #define DPAD_LEFT_PIN 16
@@ -105,7 +138,15 @@ To change D-pad pin assignments, edit these defines in the firmware:
 #endif
 ```
 
-To disable D-pad support entirely, comment out or remove:
+**To change I2C address** (when using `DPAD_I2C_PIMORONI`):
+
+```cpp
+#ifdef DPAD_I2C_PIMORONI
+  #define PIMORONI_PAD_I2C_ADDR 0x50  // Change if needed
+#endif
+```
+
+**To disable D-pad support entirely**, comment out:
 
 ```cpp
 #define DPAD_ENABLED 1
@@ -197,10 +238,20 @@ To support other drum kits, modify the MIDI note mappings in the `onNoteOn()` fu
 
 ### D-pad Not Working
 
+**For GPIO Mode:**
 - Verify pin connections (should connect to ground when pressed)
 - Check that `DPAD_ENABLED` is defined (not commented out)
+- Verify `DPAD_GPIO_MODE` is defined and `DPAD_I2C_PIMORONI` is commented out
 - Ensure switches are connected to the correct pins
 - Test with a multimeter: pins should read ~3.3V when open, ~0V when pressed
+
+**For I2C Mode (Pimoroni Qw/ST Pad):**
+- Verify I2C connections (SDA to pin 18, SCL to pin 19)
+- Check that `DPAD_I2C_PIMORONI` is defined and `DPAD_GPIO_MODE` is commented out
+- Ensure the Pimoroni pad is powered (3.3V and GND connected)
+- Use an I2C scanner sketch to verify the device appears at address 0x50
+- Check for loose connections on the I2C bus
+- Try adding 4.7kΩ pull-up resistors on SDA and SCL if the cable is long
 
 ### USB Host Not Detecting Drum Kit
 
@@ -233,10 +284,13 @@ The following defines can be modified in the firmware:
 | `NOTE_ON_TIME` | 25 | Minimum pad "on" duration in milliseconds |
 | `BLINKY` | 1 | Enable LED blinking when pads are active |
 | `DPAD_ENABLED` | 1 | Enable D-pad support |
-| `DPAD_UP_PIN` | 14 | D-pad up button pin |
-| `DPAD_DOWN_PIN` | 15 | D-pad down button pin |
-| `DPAD_LEFT_PIN` | 16 | D-pad left button pin |
-| `DPAD_RIGHT_PIN` | 17 | D-pad right button pin |
+| `DPAD_GPIO_MODE` | undefined | Use GPIO pins for D-pad (mutually exclusive with I2C) |
+| `DPAD_I2C_PIMORONI` | defined | Use Pimoroni Qw/ST Pad via I2C (mutually exclusive with GPIO) |
+| `DPAD_UP_PIN` | 14 | D-pad up button pin (GPIO mode only) |
+| `DPAD_DOWN_PIN` | 15 | D-pad down button pin (GPIO mode only) |
+| `DPAD_LEFT_PIN` | 16 | D-pad left button pin (GPIO mode only) |
+| `DPAD_RIGHT_PIN` | 17 | D-pad right button pin (GPIO mode only) |
+| `PIMORONI_PAD_I2C_ADDR` | 0x50 | I2C address for Pimoroni pad (I2C mode only) |
 | `YAMAHA_DTX_502` | undefined | Use Yamaha DTX-502 note mappings |
 
 ## Technical Details

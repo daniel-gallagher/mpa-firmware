@@ -1,4 +1,5 @@
 #include <USBHost_t36.h>
+#include <Wire.h>
 
 // Board detection - this firmware supports both Teensy 3.6 and Teensy 4.1
 #if defined(__IMXRT1062__)
@@ -58,14 +59,35 @@ bool kitDirty;
 #define NOTE_ON_TIME 25
 #define BLINKY 1
 
-// D-pad pin configuration for Rock Band navigation
-// These pins should be connected to switches that short to ground when pressed
+// D-pad configuration for Rock Band navigation
+// Two modes supported:
+// 1. GPIO mode: Direct pin connections (switches to ground)
+// 2. I2C mode: Pimoroni Qw/ST Pad
 #define DPAD_ENABLED 1
 #ifdef DPAD_ENABLED
-  #define DPAD_UP_PIN 14
-  #define DPAD_DOWN_PIN 15
-  #define DPAD_LEFT_PIN 16
-  #define DPAD_RIGHT_PIN 17
+  // Choose D-pad mode: comment/uncomment one of these
+  //#define DPAD_GPIO_MODE
+  #define DPAD_I2C_PIMORONI
+  
+  #ifdef DPAD_GPIO_MODE
+    // GPIO mode: pins connected to switches that short to ground when pressed
+    #define DPAD_UP_PIN 14
+    #define DPAD_DOWN_PIN 15
+    #define DPAD_LEFT_PIN 16
+    #define DPAD_RIGHT_PIN 17
+  #endif
+  
+  #ifdef DPAD_I2C_PIMORONI
+    // Pimoroni Qw/ST Pad I2C configuration
+    #define PIMORONI_PAD_I2C_ADDR 0x50
+    // Register addresses for Pimoroni Qw/ST Pad
+    #define PIMORONI_REG_BUTTON 0x00
+    // Button bit masks
+    #define PIMORONI_BTN_UP    0x01
+    #define PIMORONI_BTN_DOWN  0x02
+    #define PIMORONI_BTN_LEFT  0x04
+    #define PIMORONI_BTN_RIGHT 0x08
+  #endif
 #endif
 
 // the Yamaha DTX 502 seems to assign MIDI numbers to the crash and ride hats that
@@ -93,11 +115,19 @@ void setup() {
   pinMode( LEDPIN, OUTPUT );
 
 #ifdef DPAD_ENABLED
-  // Configure D-pad pins with internal pullups
-  pinMode( DPAD_UP_PIN, INPUT_PULLUP );
-  pinMode( DPAD_DOWN_PIN, INPUT_PULLUP );
-  pinMode( DPAD_LEFT_PIN, INPUT_PULLUP );
-  pinMode( DPAD_RIGHT_PIN, INPUT_PULLUP );
+  #ifdef DPAD_GPIO_MODE
+    // Configure D-pad GPIO pins with internal pullups
+    pinMode( DPAD_UP_PIN, INPUT_PULLUP );
+    pinMode( DPAD_DOWN_PIN, INPUT_PULLUP );
+    pinMode( DPAD_LEFT_PIN, INPUT_PULLUP );
+    pinMode( DPAD_RIGHT_PIN, INPUT_PULLUP );
+  #endif
+  
+  #ifdef DPAD_I2C_PIMORONI
+    // Initialize I2C for Pimoroni Qw/ST Pad
+    Wire.begin();
+    Wire.setClock(100000); // 100kHz I2C
+  #endif
   
   // Initialize D-pad state
   currentDpadState.up = false;
@@ -135,6 +165,23 @@ void setup() {
   midiInput.setHandleControlChange( controlChange );
 #endif
 };
+
+#ifdef DPAD_I2C_PIMORONI
+// Read button state from Pimoroni Qw/ST Pad via I2C
+uint8_t readPimoroniPad() {
+  Wire.beginTransmission(PIMORONI_PAD_I2C_ADDR);
+  Wire.write(PIMORONI_REG_BUTTON);
+  if (Wire.endTransmission() != 0) {
+    return 0; // I2C error, return no buttons pressed
+  }
+  
+  Wire.requestFrom(PIMORONI_PAD_I2C_ADDR, (uint8_t)1);
+  if (Wire.available()) {
+    return Wire.read();
+  }
+  return 0;
+}
+#endif
 
 // if a kit has a positive time on remaining, reduce it by 'elapsed' milliseconds,
 // but clamp the value at zero. set the kit dirty flag if any kit would hit zero.
@@ -186,11 +233,23 @@ void loop() {
   }
 
 #ifdef DPAD_ENABLED
-  // Read D-pad state (active LOW - pressed when pin is LOW)
-  currentDpadState.up = ( digitalRead( DPAD_UP_PIN ) == LOW );
-  currentDpadState.down = ( digitalRead( DPAD_DOWN_PIN ) == LOW );
-  currentDpadState.left = ( digitalRead( DPAD_LEFT_PIN ) == LOW );
-  currentDpadState.right = ( digitalRead( DPAD_RIGHT_PIN ) == LOW );
+  // Read D-pad state based on configured mode
+  #ifdef DPAD_GPIO_MODE
+    // GPIO mode: Read pins (active LOW - pressed when pin is LOW)
+    currentDpadState.up = ( digitalRead( DPAD_UP_PIN ) == LOW );
+    currentDpadState.down = ( digitalRead( DPAD_DOWN_PIN ) == LOW );
+    currentDpadState.left = ( digitalRead( DPAD_LEFT_PIN ) == LOW );
+    currentDpadState.right = ( digitalRead( DPAD_RIGHT_PIN ) == LOW );
+  #endif
+  
+  #ifdef DPAD_I2C_PIMORONI
+    // I2C mode: Read from Pimoroni Qw/ST Pad
+    uint8_t buttons = readPimoroniPad();
+    currentDpadState.up = (buttons & PIMORONI_BTN_UP) != 0;
+    currentDpadState.down = (buttons & PIMORONI_BTN_DOWN) != 0;
+    currentDpadState.left = (buttons & PIMORONI_BTN_LEFT) != 0;
+    currentDpadState.right = (buttons & PIMORONI_BTN_RIGHT) != 0;
+  #endif
   
   // Check if D-pad state changed
   if( currentDpadState.up != previousDpadState.up ||

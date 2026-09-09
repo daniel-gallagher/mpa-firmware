@@ -1,342 +1,159 @@
 # Teensy 4.1 Migration Guide
 
-## Overview
+This documents the move of the MPA firmware from a Teensy 3.6 to a **Teensy 4.1**, the
+D-pad addition, and how to set up the build environment. The same sketch still builds for
+the 3.6.
 
-This document describes the changes made to port the MPA firmware from Teensy 3.6 to **Teensy 4.1**, and documents the addition of D-pad support for Rock Band gameplay.
+## What changed for the 4.1
 
-The firmware now automatically detects which board it's running on and works identically on both Teensy 3.6 and Teensy 4.1 platforms.
+| | Teensy 3.6 | Teensy 4.1 |
+|---|---|---|
+| CPU | MK66FX1M0, Cortex-M4 @ 180 MHz | i.MX RT1062, Cortex-M7 @ 600 MHz |
+| USB device port | 12 Mbit | 480 Mbit capable; cores-mpa forces 12 Mbit for the MPA type |
+| USB host | 5-pin header, USBHost_t36 | 5-pin header, USBHost_t36 (same API) |
+| I2C (Wire) | pins 18 (SDA) / 19 (SCL) | pins 18 (SDA) / 19 (SCL) |
+| LED | 13 | 13 |
+| I/O voltage | 3.3 V, 5 V tolerant | 3.3 V, **not** 5 V tolerant |
 
-## Hardware Compatibility
+The sketch itself needed no board-specific code: it detects the board with `__IMXRT1062__`
+/ `__MK66FX1M0__` only to print which one it is compiling for. The real port is in
+**cores-mpa**, which did not have a Teensy 4 implementation of the MPA USB type before.
+That now lives in `teensy4/usb_mpa.c` on the `teensyduino-1.62` branch of cores-mpa.
 
-### Teensy 4.1 vs Teensy 3.6
+## Environment setup
 
-| Feature | Teensy 3.6 | Teensy 4.1 | Notes |
-|---------|-----------|-----------|-------|
-| CPU | ARM Cortex-M4 @ 180 MHz | ARM Cortex-M7 @ 600 MHz | Significantly faster |
-| RAM | 256 KB | 1024 KB | More memory available |
-| USB Host | Yes (via 5-pin header) | Yes (via 5-pin header) | Same interface |
-| LED Pin | 13 | 13 | No change needed |
-| Voltage | 3.3V I/O | 3.3V I/O | Compatible |
-| Libraries | USBHost_t36 | USBHost_t36 | Same library works on both |
+1. Arduino IDE 2.x. Add `https://www.pjrc.com/teensy/package_teensy_index.json` to
+   *Additional boards manager URLs* and install **Teensy 1.62.0** from Boards Manager.
+2. Clone [cores-mpa](https://github.com/daniel-gallagher/cores-mpa), check out the
+   `teensyduino-1.62` branch and run `install-mpa-platform.ps1` in PowerShell. This creates
+   `Documents\Arduino\hardware\teensy-mpa\avr`, a copy of the stock platform with the MPA
+   core files overlaid and the extra USB Type in the menu. The stock Teensy package under
+   `Arduino15` is left untouched, so Boards Manager updates never remove the mod.
+3. Restart the IDE. Select **Teensyduino (cores-mpa) > Teensy 4.1 (MPA)** and
+   **USB Type > MIDI Pro Adapter (MPA)**.
 
-### Key Differences
+If you update Teensyduino later, update cores-mpa to the matching branch first, then re-run
+the install script.
 
-1. **Processor Architecture**: Teensy 4.1 uses NXP i.MX RT1062 (ARM Cortex-M7) instead of MK66FX1M0 (ARM Cortex-M4)
-2. **Performance**: Teensy 4.1 is approximately 3x faster
-3. **Pin Compatibility**: Most digital pins work identically, but internal peripherals may differ
-4. **Timing**: The firmware uses `millis()` for timing which works identically on both boards
+## Flashing
 
-## Code Changes
+- With the MPA USB Type there is no USB serial, so Teensy Loader cannot ask the board to
+  reboot into the bootloader. Click Upload, then press the **program button** on the Teensy
+  when the loader window says to.
+- First flash of a brand-new 4.1: any USB Type works for the first upload since the board
+  ships in bootloader mode; later uploads always need the button while running MPA firmware.
+- The board also cannot print to the serial monitor. Use the pin 13 LED
+  (1.5 s on at boot, blinks with pad hits) as the status indicator.
 
-### Board Detection
+## D-pad
 
-The firmware now includes automatic board detection:
+### Pimoroni Qw/ST Pad (default, `DPAD_I2C_PIMORONI`)
 
-```cpp
-#if defined(__IMXRT1062__)
-  #define TEENSY_41
-#elif defined(__MK66FX1M0__)
-  #define TEENSY_36
-#endif
-```
-
-This allows the same code to work on both platforms without modification.
-
-### Library Compatibility
-
-- **USBHost_t36**: This library works on both Teensy 3.6 and 4.x boards
-- **cores-mpa**: The custom MPA USB type must support Teensy 4.1 (ensure you have the latest version)
-
-### Pin Assignments
-
-The following pins are used by the firmware:
-
-| Function | Pin | Notes |
-|----------|-----|-------|
-| LED | 13 | Built-in LED (same on both boards) |
-| Start/Select Input | 0 | Optional, disabled by default |
-| D-pad Up | 14 | New feature, see D-pad section |
-| D-pad Down | 15 | New feature, see D-pad section |
-| D-pad Left | 16 | New feature, see D-pad section |
-| D-pad Right | 17 | New feature, see D-pad section |
-
-## D-pad Support
-
-### Overview
-
-D-pad support has been added for Rock Band navigation and menu control. Two modes are supported:
-1. **GPIO Mode**: Direct connection of switches to Teensy pins
-2. **I2C Mode**: Pimoroni Qw/ST Pad connected via I2C
-
-### Mode Selection
-
-Choose your D-pad mode by uncommenting the appropriate define in the firmware:
-
-```cpp
-#ifdef DPAD_ENABLED
-  // Choose D-pad mode: comment/uncomment one of these
-  //#define DPAD_GPIO_MODE       // Direct pin connections
-  #define DPAD_I2C_PIMORONI     // Pimoroni Qw/ST Pad (default)
-#endif
-```
-
-### GPIO Mode Hardware Connection
-
-When using `DPAD_GPIO_MODE`, each D-pad direction requires:
-1. A momentary switch (pushbutton or arcade button)
-2. Connection between the assigned pin and ground when pressed
-
-**GPIO Mode Wiring Diagram:**
+The pad is a TCA9555 16-bit I/O expander on the Qw/ST (I2C) connector. The firmware
+configures it exactly like Pimoroni's own driver (buttons as inputs with inverted polarity
+so pressed reads as 1, LED pins as outputs, LEDs off) and reads the two input registers.
 
 ```
-Teensy 4.1          Switch          Ground
-Pin 14 (Up)    ----[SWITCH]----    GND
-Pin 15 (Down)  ----[SWITCH]----    GND
-Pin 16 (Left)  ----[SWITCH]----    GND
-Pin 17 (Right) ----[SWITCH]----    GND
+Teensy 4.1               Qw/ST Pad
+Pin 18 (SDA)  ---------  SDA
+Pin 19 (SCL)  ---------  SCL
+3.3V          ---------  3V3
+GND           ---------  GND
 ```
 
-The D-pad pins are configured with internal pull-ups, so they read HIGH when not pressed and LOW when the button is pressed (shorting to ground).
+- Address `0x21` by default; `0x23`, `0x25`, `0x27` by cutting the traces on the back
+  (update `PIMORONI_PAD_I2C_ADDR`).
+- The pad has pull-ups on the bus; a Qw/ST cable straight to the Teensy pins is enough.
+- Button bit numbers in the 16-bit word: Up 1, Left 2, Right 3, Down 4, `-` 5, `+` 11,
+  B 12, Y 13, A 14, X 15.
+- **`+` presses Start and `-` presses Select** (`DPAD_I2C_START_SELECT`). A/B/X/Y are
+  read but unused.
+- The pad is polled every 5 ms (`DPAD_POLL_MS`), not every loop, so the I2C transaction
+  does not add latency to MIDI handling. If the pad is missing or unplugged, the firmware
+  releases all directions and re-probes once a second (`DPAD_PROBE_MS`).
 
-Default GPIO pin assignments:
-- **Up**: Pin 14
-- **Down**: Pin 15
-- **Left**: Pin 16
-- **Right**: Pin 17
+#### Status LEDs (`DPAD_I2C_LEDS`)
 
-### I2C Mode (Pimoroni Qw/ST Pad)
+The pad's four white LEDs (expander pins 6, 7, 9, 10, active low) are driven from the same
+5 ms tick as the buttons. The output register is only written when the pattern changes, so
+in normal play the bus is idle apart from the button poll. Left to right:
 
-When using `DPAD_I2C_PIMORONI` (default), connect the Pimoroni Qw/ST Pad via I2C:
+| LED | Meaning | Source |
+|---|---|---|
+| 1 | Kit connected | USBHost_t36 has enumerated a MIDI device on the host port |
+| 2 | Console connected | the host has sent SET_CONFIGURATION (`usb_configuration` non-zero) |
+| 3 | Pedal is Start | `CC_MAX` is defined, so the hi-hat pedal presses Start |
+| 4 | Hit | any pad is down; pulse stretched to `LED_HIT_MS` (60 ms) so it is visible |
 
-**I2C Wiring:**
+On the bench, LED 1 and 2 answer the two questions that matter first: is the Nitro
+recognised, and has the PC/console accepted the adapter. Comment out `DPAD_I2C_LEDS` to
+leave the LEDs dark.
 
-```
-Teensy 4.1          Pimoroni Qw/ST Pad
-SDA (Pin 18)   ---- SDA
-SCL (Pin 19)   ---- SCL
-3.3V           ---- 3.3V
-GND            ---- GND
-```
+### GPIO switches (`DPAD_GPIO_MODE`)
 
-**I2C Configuration:**
-- **I2C Address**: 0x50 (default for Pimoroni Qw/ST Pad)
-- **I2C Speed**: 100 kHz
-- **Interface**: Uses standard Wire library
+Four momentary switches from the pin to ground, internal pull-ups enabled:
 
-The Pimoroni Qw/ST Pad is automatically detected and read via I2C. No pin configuration is needed.
+| Direction | Pin |
+|---|---|
+| Up | 14 |
+| Down | 15 |
+| Left | 16 |
+| Right | 17 |
 
-### Customizing D-pad Configuration
+### Behaviour
 
-**To change GPIO pin assignments** (when using `DPAD_GPIO_MODE`):
+D-pad directions drive the MPA hat switch, including diagonals when two adjacent buttons
+are held. While any direction is held it overrides the hat values the yellow/blue cymbals
+would otherwise produce, so menus can be navigated without accidental cymbal input.
 
-```cpp
-#ifdef DPAD_GPIO_MODE
-  #define DPAD_UP_PIN 14
-  #define DPAD_DOWN_PIN 15
-  #define DPAD_LEFT_PIN 16
-  #define DPAD_RIGHT_PIN 17
-#endif
-```
+## Alesis Nitro
 
-**To change I2C address** (when using `DPAD_I2C_PIMORONI`):
+`ALESIS_NITRO` is on by default. The Nitro's factory map (from the Nitro user guide, "Pad
+MIDI Note Numbers"):
 
-```cpp
-#ifdef DPAD_I2C_PIMORONI
-  #define PIMORONI_PAD_I2C_ADDR 0x50  // Change if needed
-#endif
-```
+| Pad | Note | Rock Band |
+|---|---|---|
+| Kick | 36 | Kick |
+| Snare / rim | 38 / 40 | Red |
+| Tom 1 / rim | 48 / 50 | Yellow pad |
+| Tom 2 / rim | 45 / 47 | Blue pad |
+| Tom 3 / rim | 43 / 58 | Green pad |
+| Hi-hat open / half-open / closed / pedal / splash | 46 / 23 / 42 / 44 / 21 | Yellow cymbal |
+| Ride | 51 | Blue cymbal |
+| Crash 1 / Crash 2 | 49 / 57 | Green cymbal |
 
-**To disable D-pad support entirely**, comment out:
+Compared with the Roland table, the Nitro option adds notes 21 and 23 to the yellow cymbal
+and moves 58 from the blue cymbal to the green pad.
 
-```cpp
-#define DPAD_ENABLED 1
-```
+**Hi-hat pedal:** the Nitro sends note 44 *and* continuous controller 4 when the pedal is
+pressed. With `CC_MAX` defined (the default, carried over from the 3.6 firmware) a pedal
+press therefore also presses **Start**, which pauses a song. If that is not what you want,
+comment out `CC_MAX` and use the Qw/ST Pad's `+` for Start.
 
-### D-pad Behavior
+## Bench test plan
 
-The D-pad is mapped to the MPA HAT control, which Rock Band uses for menu navigation:
-
-- **Single directions**: Up, Down, Left, Right
-- **Diagonal directions**: Up-Left, Up-Right, Down-Left, Down-Right (when two adjacent buttons pressed)
-
-The D-pad takes priority over cymbal hat controls when pressed, allowing you to navigate menus without triggering unwanted drum hits.
-
-## Installation Instructions
-
-### Prerequisites
-
-1. **Arduino IDE** (version 1.8.19 or newer) or **Teensyduino**
-2. **Teensyduino** add-on installed (https://www.pjrc.com/teensy/td_download.html)
-3. **USBHost_t36** library (included with Teensyduino)
-4. **cores-mpa** custom USB type (https://github.com/curiousjp/cores-mpa)
-
-### Installing cores-mpa for Teensy 4.1
-
-1. Download or clone the cores-mpa repository
-2. Follow the installation instructions in the cores-mpa README
-3. Ensure it includes Teensy 4.1 support (check for `__IMXRT1062__` definitions)
-4. Restart Arduino IDE after installation
-
-### Compiling and Uploading
-
-1. Open `teensympa-refcount.ino` in Arduino IDE
-2. Select your board:
-   - **Tools → Board → Teensyduino → Teensy 4.1** (or Teensy 3.6)
-3. Select USB Type:
-   - **Tools → USB Type → MIDI Pro Adapter (MPA)**
-4. Select CPU Speed (recommended):
-   - **Tools → CPU Speed → 600 MHz** (for Teensy 4.1)
-   - **Tools → CPU Speed → 180 MHz** (for Teensy 3.6)
-5. Connect your Teensy via USB
-6. Click **Upload** (or Sketch → Upload)
-
-The Arduino IDE will compile the firmware and automatically detect which board you selected.
-
-### Verification
-
-After uploading:
-
-1. The built-in LED (pin 13) will turn on for 1.5 seconds during initialization
-2. Watch the Arduino IDE console for board detection messages:
-   - "Compiling for Teensy 4.1" or "Compiling for Teensy 3.6"
-3. The LED will blink when drum pads are hit (if BLINKY is enabled)
-
-## Usage
-
-### Connecting a MIDI Drum Kit
-
-1. Connect your MIDI drum brain to the Teensy's USB host port using:
-   - USB host cable (5-pin header to USB-A adapter)
-   - Your drum kit's USB cable
-2. Power the Teensy from your computer or game console
-3. The Teensy acts as a MIDI Pro Adapter, translating drum hits to MPA button presses
-
-### Rock Band Integration
-
-1. Connect the Teensy (configured as MPA) to your game console's USB port
-2. The game will recognize it as a MIDI Pro Adapter
-3. Use drum pads for gameplay
-4. Use the D-pad for menu navigation
-5. Use start/select button (pin 0 or hat pedal) for game control
-
-### Supported Drum Kits
-
-The firmware includes MIDI note mappings for:
-- **Roland V-Drums** (TD-1, TD-17, TD-27, etc.)
-- **Yamaha DTX** series (enable `YAMAHA_DTX_502` define for DTX-502)
-
-To support other drum kits, modify the MIDI note mappings in the `onNoteOn()` function.
+1. **Flash** with the MPA USB type. LED lights for 1.5 s at boot.
+2. **Plug into a PC first.** It should enumerate as "Harmonix Drum kit for PlayStation(R)3"
+   (VID 12BA, PID 0218) and show as a game controller with 13 buttons and a hat; pad LED 2
+   lights once the PC has configured it. Windows
+   *Set up USB game controllers* is enough to see buttons and hat move.
+3. **Connect the Nitro** to the host port. Pad LED 1 should light. Hit each pad and cymbal; check the pin 13 LED and pad LED 4 blink
+   and the right controller button lights (kick = button 5, red 3, yellow 4, blue 1,
+   green 2 in Windows' 1-based numbering).
+4. **D-pad.** Press each direction and diagonals and watch the hat; `+` / `-` should show
+   as buttons 10 / 9.
+5. **Hi-hat pedal.** Confirm whether you want it to press Start (see above).
+6. **Console.** Plug into the console and check it is recognised as a drum kit.
+   If it is not, the first thing to try is letting the port run at 480 Mbit: add
+   `-DMPA_ALLOW_HIGH_SPEED` to the build (or edit `usb.c` in cores-mpa) and re-flash.
 
 ## Troubleshooting
 
-### Firmware Won't Compile
-
-- Ensure Teensyduino is properly installed
-- Verify cores-mpa is installed and supports your Teensy version
-- Check that USBHost_t36 library is available
-- Make sure you selected the correct board in Tools → Board
-
-### D-pad Not Working
-
-**For GPIO Mode:**
-- Verify pin connections (should connect to ground when pressed)
-- Check that `DPAD_ENABLED` is defined (not commented out)
-- Verify `DPAD_GPIO_MODE` is defined and `DPAD_I2C_PIMORONI` is commented out
-- Ensure switches are connected to the correct pins
-- Test with a multimeter: pins should read ~3.3V when open, ~0V when pressed
-
-**For I2C Mode (Pimoroni Qw/ST Pad):**
-- Verify I2C connections (SDA to pin 18, SCL to pin 19)
-- Check that `DPAD_I2C_PIMORONI` is defined and `DPAD_GPIO_MODE` is commented out
-- Ensure the Pimoroni pad is powered (3.3V and GND connected)
-- Use an I2C scanner sketch to verify the device appears at address 0x50
-- Check for loose connections on the I2C bus
-- Try adding 4.7kΩ pull-up resistors on SDA and SCL if the cable is long
-
-### USB Host Not Detecting Drum Kit
-
-- Check USB host cable connection (5-pin header to USB-A)
-- Ensure drum kit is powered on before the Teensy initializes
-- Try unplugging and replugging the drum kit
-- Some drum kits may require a powered USB hub
-
-### LED Not Blinking
-
-- Verify `BLINKY` is defined in the code
-- Check that drum kit is sending MIDI notes
-- Test with a different MIDI device to rule out kit issues
-
-### Game Console Doesn't Recognize Adapter
-
-- Ensure "MIDI Pro Adapter (MPA)" is selected in Tools → USB Type
-- Verify cores-mpa is properly installed
-- Some consoles may require specific MPA firmware versions
-
-## Configuration Options
-
-The following defines can be modified in the firmware:
-
-| Define | Default | Description |
-|--------|---------|-------------|
-| `LEDPIN` | 13 | Built-in LED pin |
-| `INPUTPIN` | undefined | Optional start/select button (short to ground) |
-| `CC_MAX` | 0x5A | CC threshold for hat pedal start/select |
-| `NOTE_ON_TIME` | 25 | Minimum pad "on" duration in milliseconds |
-| `BLINKY` | 1 | Enable LED blinking when pads are active |
-| `DPAD_ENABLED` | 1 | Enable D-pad support |
-| `DPAD_GPIO_MODE` | undefined | Use GPIO pins for D-pad (mutually exclusive with I2C) |
-| `DPAD_I2C_PIMORONI` | defined | Use Pimoroni Qw/ST Pad via I2C (mutually exclusive with GPIO) |
-| `DPAD_UP_PIN` | 14 | D-pad up button pin (GPIO mode only) |
-| `DPAD_DOWN_PIN` | 15 | D-pad down button pin (GPIO mode only) |
-| `DPAD_LEFT_PIN` | 16 | D-pad left button pin (GPIO mode only) |
-| `DPAD_RIGHT_PIN` | 17 | D-pad right button pin (GPIO mode only) |
-| `PIMORONI_PAD_I2C_ADDR` | 0x50 | I2C address for Pimoroni pad (I2C mode only) |
-| `YAMAHA_DTX_502` | undefined | Use Yamaha DTX-502 note mappings |
-
-## Technical Details
-
-### Timing Behavior
-
-The firmware uses `millis()` for timing instead of hardware interrupts:
-- More portable across Teensy versions
-- No interrupt priority conflicts
-- Simpler code maintenance
-- **Important**: Reboot the adapter at least once every 50 days to prevent `millis()` overflow issues
-
-### MIDI Note Mapping
-
-Drum pads are mapped to MPA buttons as follows:
-
-| Drum Pad | MPA Button | Notes |
-|----------|-----------|-------|
-| Kick | 4 | Bass drum pedal |
-| Red Pad | 2 | Snare |
-| Yellow Pad/Cymbal | 3 | Tom or Hi-hat |
-| Blue Pad/Cymbal | 0 | Tom or Crash |
-| Green Pad/Cymbal | 1 | Tom or Ride |
-
-### HAT Control
-
-The MPA HAT is used for:
-- Yellow cymbal → HAT UP
-- Blue cymbal → HAT DOWN  
-- D-pad directions → HAT UP/DOWN/LEFT/RIGHT (takes priority when pressed)
-
-## References
-
-- [Teensy 4.1 Documentation](https://www.pjrc.com/store/teensy41.html)
-- [cores-mpa Repository](https://github.com/curiousjp/cores-mpa)
-- [USBHost_t36 Library](https://github.com/PaulStoffregen/USBHost_t36)
-- [Original MPA Firmware](https://github.com/daniel-gallagher/mpa-firmware)
-
-## License
-
-This firmware maintains the same license as the original mpa-firmware project.
-
-## Contributing
-
-Improvements and bug reports are welcome! Please submit issues or pull requests to the GitHub repository.
-
----
-
-**Last Updated**: December 2025
+- **`usb_mpa_reset_packet was not declared`** – the MPA USB Type is not selected, or the
+  cores-mpa platform is not installed. Board must be the *(MPA)* one from the
+  *Teensyduino (cores-mpa)* package.
+- **D-pad does nothing** – run an I2C scanner sketch (with a normal USB Type so you have a
+  serial monitor); the pad must answer at `0x21`. Check the Qw/ST cable orientation.
+- **Every hi-hat press pauses the game** – comment out `CC_MAX`.
+- **Kit not detected on the host port** – power the kit on before the Teensy, or try a
+  powered hub; the 4.1's host port supplies limited current.

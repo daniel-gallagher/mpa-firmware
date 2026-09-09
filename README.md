@@ -1,48 +1,65 @@
 # mpa-firmware
 
-This Arduino sketch is firmware for a **Teensy 3.6** or **Teensy 4.1** using the MPA USB Type added by [cores-mpa](https://github.com/curiousjp/cores-mpa).
+Arduino sketch for a **Teensy 4.1** (or Teensy 3.6) that turns a USB MIDI drum kit into a
+Rock Band drum controller, using the "MIDI Pro Adapter (MPA)" USB Type from
+[cores-mpa](https://github.com/daniel-gallagher/cores-mpa).
+
+The Teensy's USB host port listens for a MIDI kit. Each note-on is looked up in a note map
+and sets the matching MPA pad/cymbal for 25 ms (note-offs are ignored). The Teensy's device
+port presents itself to the console as a MadCatz MIDI Pro Adapter.
 
 ## Features
 
-- **Dual Board Support**: Works on both Teensy 3.6 and Teensy 4.1 with automatic board detection
-- **MIDI Drum Kit Translation**: Listens for MIDI input from drum kits and translates to MPA button presses
-- **D-pad Support**: Added support for a 4-direction D-pad for Rock Band menu navigation
-  - **GPIO Mode**: Direct connection of switches to Teensy pins
-  - **I2C Mode**: Pimoroni Qw/ST Pad via I2C (default)
-- **Flexible Input**: Start/Select can be triggered via digital pin or continuous controller (hat pedal)
-- **Drum Kit Compatibility**: Includes note mappings for Roland V-Drums and Yamaha DTX series
+- **Teensy 4.1 and 3.6** from one sketch (board is detected at compile time)
+- **Alesis Nitro** note map (default), plus Roland V-Drums (TD-1 etc.) and Yamaha DTX 502
+- **D-pad for menu navigation**, either
+  - a **Pimoroni Qw/ST Pad** over I2C (default), whose `+` / `-` buttons also act as
+    Start / Select and whose four LEDs show kit / console / pedal / hit status, or
+  - four switches to ground on GPIO pins 14-17
+- Start can also come from a switch on pin 0 or from any continuous controller above a
+  threshold (i.e. the hi-hat pedal)
+- LED on pin 13 blinks while any pad is held
 
-## Quick Start
+## Requirements
 
-The firmware listens for a MIDI kit on the Teensy's USB host port. When it receives a MIDI message, it compares the note number to a list of mappings and sets the appropriate MPA pad. Pads automatically unset 25ms later (doesn't wait for note-off messages).
+- Arduino IDE 2.x (or arduino-cli) with **Teensyduino 1.62.0** installed via Boards Manager
+- The **cores-mpa** platform installed with its `install-mpa-platform.ps1` script. It shows
+  up as board package *Teensyduino (cores-mpa)* and provides the MPA USB Type
+- USBHost_t36 and Wire (both ship with Teensyduino)
 
-Start/Select can be pressed either by:
-- Shorting digital pin zero to ground using a switch, or
-- Sending any continuous control message (such as via a hat pedal) with a value of more than 0x5A
+## Building and flashing
 
-## New in This Version
+1. Open `teensympa-refcount/teensympa-refcount.ino`
+2. **Tools > Board > Teensyduino (cores-mpa) > Teensy 4.1 (MPA)**
+3. **Tools > USB Type > MIDI Pro Adapter (MPA)**
+4. **Tools > CPU Speed > 600 MHz**
+5. Upload. Because the MPA type has no serial port the loader cannot reboot the board
+   itself: press the **program button** on the Teensy when Teensy Loader asks for it.
 
-✨ **Teensy 4.1 Support**: Full compatibility with Teensy 4.1 hardware  
-✨ **D-pad Navigation**: Added 4-direction D-pad support for Rock Band menus  
-✨ **I2C D-pad Support**: Now supports Pimoroni Qw/ST Pad via I2C (as well as GPIO mode)  
-✨ **Improved Documentation**: Comprehensive migration guide and pinout information
+arduino-cli equivalent:
 
-## Documentation
+```bash
+arduino-cli compile --fqbn teensy-mpa:avr:teensy41:usb=mpa,speed=600,opt=o2std,keys=en-us teensympa-refcount
+```
 
-For detailed information about Teensy 4.1 porting, D-pad setup, and installation instructions, see:
-
-📖 **[TEENSY41_MIGRATION.md](TEENSY41_MIGRATION.md)** - Complete migration guide with:
-- Hardware compatibility details
-- D-pad wiring instructions
-- Pin assignments and customization
-- Installation and compilation guide
-- Troubleshooting tips
+See [TEENSY41_MIGRATION.md](TEENSY41_MIGRATION.md) for wiring, configuration and a
+first-power-up test plan.
 
 ## Configuration
 
-Most settings can be customized via defines in the code:
-- Note-on duration timing
-- MIDI note mappings (supports Yamaha DTX 502 with a define)
-- D-pad pin assignments
-- LED blink behavior
-- Start/Select input options
+Everything is a `#define` near the top of the sketch:
+
+| Define | Default | Purpose |
+|---|---|---|
+| `ALESIS_NITRO` | on | Alesis Nitro / Nitro Mesh factory note map |
+| `YAMAHA_DTX_502` | off | Yamaha DTX 502 crash/ride swap |
+| `DPAD_ENABLED` | on | Any D-pad support at all |
+| `DPAD_I2C_PIMORONI` / `DPAD_GPIO_MODE` | I2C | Which D-pad hardware (pick one) |
+| `PIMORONI_PAD_I2C_ADDR` | `0x21` | Qw/ST Pad address (`0x23`/`0x25`/`0x27` via rear traces) |
+| `DPAD_I2C_START_SELECT` | on | Map the pad's `+` to Start and `-` to Select |
+| `DPAD_I2C_LEDS` | on | Pad LEDs: kit connected, console connected, pedal-is-Start, hit flash |
+| `LED_HIT_MS` | 60 | Length of the hit LED pulse |
+| `CC_MAX` | `0x5A` | Any CC value at or above this presses Start (comment out to disable) |
+| `INPUTPIN` | off | Pin that presses Start when shorted to ground |
+| `NOTE_ON_TIME` | 25 | ms a hit stays "down" |
+| `BLINKY` | on | LED feedback |
